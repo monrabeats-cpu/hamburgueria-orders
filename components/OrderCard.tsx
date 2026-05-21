@@ -33,8 +33,9 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
         const debug: string = data._notificationDebug ?? '';
         if (debug.startsWith('sent')) setNotifStatus('sent');
         else if (debug.startsWith('skipped')) setNotifStatus('skipped');
-        else setNotifStatus('error');
-        onStatusChange(order.id, status);
+        else if (debug.startsWith('error')) setNotifStatus('error');
+        // Small delay so indicator is visible before card moves column
+        setTimeout(() => onStatusChange(order.id, status), 1200);
       }
     } finally {
       setLoading(false);

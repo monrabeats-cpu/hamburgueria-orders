@@ -74,11 +74,7 @@ export async function PATCH(
       notificationDebug = `sent: sid=${sid} to=${data.whatsapp_number}`;
     } catch (err) {
       notificationDebug = `error: ${String(err)}`;
-      // Return 500 so error is visible as red in DevTools Network tab
-      return NextResponse.json(
-        { ...data, _notificationDebug: notificationDebug },
-        { status: 500 },
-      );
+      console.error('Status notification failed:', notificationDebug);
     }
   }
 
