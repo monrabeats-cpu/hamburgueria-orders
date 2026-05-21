@@ -27,11 +27,9 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        console.log('[notification]', data._notificationDebug);
-        onStatusChange(order.id, status);
-      }
+      const data = await res.json();
+      alert(`Debug: ${data._notificationDebug}`);
+      if (res.ok) onStatusChange(order.id, status);
     } finally {
       setLoading(false);
     }
