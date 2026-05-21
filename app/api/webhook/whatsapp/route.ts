@@ -49,12 +49,11 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  let replyBody: string;
+  let replyBody: string | null = null;
   let targetOrderId: string | null = activeOrder?.id ?? null;
 
   if (activeOrder) {
-    // Customer has active order — reply with current status
-    replyBody = STATUS_REPLY[activeOrder.status as OrderStatus] ?? 'Processando seu pedido...';
+    // Customer has active order — log message silently, proactive notifications handle updates
   } else {
     // No active order — let LLM agent handle the conversation
     const { data: previousMessages } = await supabase
@@ -105,17 +104,18 @@ export async function POST(request: NextRequest) {
     content: messageBody,
   });
 
-  // Log outbound message
-  await supabase.from('messages').insert({
-    order_id: targetOrderId,
-    whatsapp_number: from,
-    direction: 'outbound',
-    content: replyBody,
-  });
-
-  // Reply via TwiML (works in both Sandbox and production)
   const twimlResponse = new twilio.twiml.MessagingResponse();
-  twimlResponse.message(replyBody);
+
+  if (replyBody) {
+    await supabase.from('messages').insert({
+      order_id: targetOrderId,
+      whatsapp_number: from,
+      direction: 'outbound',
+      content: replyBody,
+    });
+    twimlResponse.message(replyBody);
+  }
+
   return new NextResponse(twimlResponse.toString(), {
     status: 200,
     headers: { 'Content-Type': 'text/xml' },

@@ -19,8 +19,9 @@ export function validateTwilioSignature(
 }
 
 export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+  const from = process.env.TWILIO_WHATSAPP_NUMBER ?? '';
   await client.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER,
+    from: from.startsWith('whatsapp:') ? from : `whatsapp:${from}`,
     to: `whatsapp:${to}`,
     body,
   });
