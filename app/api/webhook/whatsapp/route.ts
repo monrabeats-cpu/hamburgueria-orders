@@ -3,7 +3,6 @@ import { validateTwilioSignature, sendWhatsAppMessage } from '@/lib/twilio';
 import { callGeminiAgent } from '@/lib/gemini';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
-import { Content } from '@google/generative-ai';
 
 const STATUS_REPLY: Record<string, string> = {
   received: 'Seu pedido foi recebido e aguarda confirmacao!',
@@ -65,8 +64,8 @@ export async function POST(request: NextRequest) {
       .order('created_at', { ascending: true })
       .limit(30);
 
-    const history: Content[] = (previousMessages ?? []).map((msg) => ({
-      role: msg.direction === 'inbound' ? 'user' : 'model',
+    const history = (previousMessages ?? []).map((msg) => ({
+      role: (msg.direction === 'inbound' ? 'user' : 'model') as 'user' | 'model',
       parts: [{ text: msg.content }],
     }));
 
