@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | grep -E '\\.(ts|tsx|js)$' && cd /home/user/hamburgueria-orders && npm test 2>&1 || true",
+            "timeout": 60,
+            "statusMessage": "Rodando testes..."
+          }
+        ]
+      }
+    ]
+  }
+}
