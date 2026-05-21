@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     // History starts from after the last order to avoid contaminating with old sessions
     const { data: lastOrder } = await supabase
       .from('orders')
-      .select('created_at')
+      .select('created_at, items, total')
       .eq('whatsapp_number', from)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -80,7 +80,11 @@ export async function POST(request: NextRequest) {
       parts: [{ text: msg.content }],
     }));
 
-    const { text, orderData } = await callGeminiAgent(history, messageBody);
+    const lastOrderContext = lastOrder
+      ? { items: lastOrder.items as { name: string; quantity: number; price: number }[], total: lastOrder.total as number }
+      : null;
+
+    const { text, orderData } = await callGeminiAgent(history, messageBody, lastOrderContext);
     replyBody = text;
 
     if (orderData) {

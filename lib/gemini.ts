@@ -90,11 +90,16 @@ function cleanContent(text: string): string {
 export async function callGeminiAgent(
   history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   currentMessage: string,
+  lastOrder?: { items: { name: string; quantity: number; price: number }[]; total: number } | null,
 ): Promise<{ text: string; orderData: OrderData | null }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+  const lastOrderNote = lastOrder
+    ? `\nÚltimo pedido do cliente: ${lastOrder.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')} — Total: R$ ${lastOrder.total.toFixed(2).replace('.', ',')}`
+    : '';
+
   const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: SYSTEM_PROMPT + lastOrderNote },
     ...history.map((msg) => ({
       role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: msg.parts[0]?.text ?? '',
