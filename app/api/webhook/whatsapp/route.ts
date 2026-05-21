@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateTwilioSignature, sendWhatsAppMessage } from '@/lib/twilio';
-import { parseOrder, formatOrderConfirmation } from '@/lib/order-parser';
+import { callGeminiAgent } from '@/lib/gemini';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
+import { Content } from '@google/generative-ai';
 
 const STATUS_REPLY: Record<string, string> = {
   received: 'Seu pedido foi recebido e aguarda confirmacao!',
@@ -16,7 +17,6 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const params = Object.fromEntries(new URLSearchParams(rawBody));
 
-  // Validate Twilio signature in production
   if (process.env.NODE_ENV === 'production') {
     const signature = request.headers.get('x-twilio-signature') ?? '';
     const url = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/whatsapp`;
@@ -35,10 +35,10 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Check if customer already has an active order today
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Check if customer already has an active order today
   const { data: activeOrder } = await supabase
     .from('orders')
     .select('id, status')
@@ -53,54 +53,67 @@ export async function POST(request: NextRequest) {
   let targetOrderId: string | null = activeOrder?.id ?? null;
 
   if (activeOrder) {
+    // Customer has active order — reply with current status
     replyBody = STATUS_REPLY[activeOrder.status as OrderStatus] ?? 'Processando seu pedido...';
   } else {
-    const parsed = parseOrder(messageBody);
+    // No active order — let LLM agent handle the conversation
+    const { data: previousMessages } = await supabase
+      .from('messages')
+      .select('direction, content')
+      .eq('whatsapp_number', from)
+      .gte('created_at', today.toISOString())
+      .order('created_at', { ascending: true })
+      .limit(30);
 
-    const { data: newOrder, error } = await supabase
-      .from('orders')
-      .insert({
-        whatsapp_number: from,
-        customer_name: profileName,
-        items: parsed.items,
-        total: parsed.total > 0 ? parsed.total : null,
-        status: 'received',
-        address: parsed.address,
-        notes: parsed.notes,
-      })
-      .select('id')
-      .single();
+    const history: Content[] = (previousMessages ?? []).map((msg) => ({
+      role: msg.direction === 'inbound' ? 'user' : 'model',
+      parts: [{ text: msg.content }],
+    }));
 
-    if (error || !newOrder) {
-      console.error('Order insert failed:', error);
-      return new NextResponse('Internal Error', { status: 500 });
+    const { text, orderData } = await callGeminiAgent(history, messageBody);
+    replyBody = text;
+
+    if (orderData) {
+      const { data: newOrder, error } = await supabase
+        .from('orders')
+        .insert({
+          whatsapp_number: from,
+          customer_name: profileName,
+          items: orderData.items,
+          total: orderData.total,
+          status: 'received',
+          address: orderData.address ?? null,
+          notes: orderData.notes ?? null,
+        })
+        .select('id')
+        .single();
+
+      if (error || !newOrder) {
+        console.error('Order insert failed:', error);
+        replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
+      } else {
+        targetOrderId = newOrder.id;
+      }
     }
-
-    targetOrderId = newOrder.id;
-    replyBody = formatOrderConfirmation(parsed.items, parsed.total);
   }
 
   // Log inbound message
-  if (targetOrderId) {
-    await supabase.from('messages').insert({
-      order_id: targetOrderId,
-      whatsapp_number: from,
-      direction: 'inbound',
-      content: messageBody,
-    });
-  }
+  await supabase.from('messages').insert({
+    order_id: targetOrderId,
+    whatsapp_number: from,
+    direction: 'inbound',
+    content: messageBody,
+  });
 
   // Send reply and log outbound
   try {
     await sendWhatsAppMessage(from, replyBody);
-    if (targetOrderId) {
-      await supabase.from('messages').insert({
-        order_id: targetOrderId,
-        whatsapp_number: from,
-        direction: 'outbound',
-        content: replyBody,
-      });
-    }
+    await supabase.from('messages').insert({
+      order_id: targetOrderId,
+      whatsapp_number: from,
+      direction: 'outbound',
+      content: replyBody,
+    });
   } catch (err) {
     console.error('WhatsApp reply failed:', err);
   }
