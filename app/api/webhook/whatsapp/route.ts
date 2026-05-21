@@ -85,30 +85,35 @@ export async function POST(request: NextRequest) {
       ? { items: lastOrder.items as { name: string; quantity: number; price: number }[], total: lastOrder.total as number }
       : null;
 
-    const { text, orderData } = await callGeminiAgent(history, messageBody, lastOrderContext);
-    replyBody = text;
+    try {
+      const { text, orderData } = await callGeminiAgent(history, messageBody, lastOrderContext);
+      replyBody = text;
 
-    if (orderData) {
-      const { data: newOrder, error } = await supabase
-        .from('orders')
-        .insert({
-          whatsapp_number: from,
-          customer_name: profileName,
-          items: orderData.items,
-          total: orderData.total,
-          status: 'received',
-          address: orderData.address ?? null,
-          notes: orderData.notes ?? null,
-        })
-        .select('id')
-        .single();
+      if (orderData) {
+        const { data: newOrder, error } = await supabase
+          .from('orders')
+          .insert({
+            whatsapp_number: from,
+            customer_name: profileName,
+            items: orderData.items,
+            total: orderData.total,
+            status: 'received',
+            address: orderData.address ?? null,
+            notes: orderData.notes ?? null,
+          })
+          .select('id')
+          .single();
 
-      if (error || !newOrder) {
-        console.error('Order insert failed:', error);
-        replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
-      } else {
-        targetOrderId = newOrder.id;
+        if (error || !newOrder) {
+          console.error('Order insert failed:', error);
+          replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
+        } else {
+          targetOrderId = newOrder.id;
+        }
       }
+    } catch (err) {
+      console.error('LLM error:', err);
+      replyBody = 'Olá! Estou com uma instabilidade agora. Por favor, tente novamente em instantes. 🙏';
     }
   }
 
