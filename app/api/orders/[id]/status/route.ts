@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus, STATUS_FLOW } from '@/lib/types';
+import { sendWhatsAppMessage } from '@/lib/twilio';
+
+const STATUS_NOTIFICATION: Partial<Record<OrderStatus, string>> = {
+  confirmed: 'Pedido confirmado! Em instantes começa o preparo. 👍',
+  preparing: 'Seu pedido está sendo preparado com carinho! 👨‍🍳',
+  ready: 'Pedido pronto! Já vamos chamar o entregador. ✅',
+  out_for_delivery: 'Seu pedido saiu para entrega! Chega em breve. 🛵',
+  delivered: 'Pedido entregue! Obrigado por pedir na Hamburgueria. Volte sempre! 😊',
+  cancelled: 'Seu pedido foi cancelado. Qualquer dúvida, é só chamar.',
+};
 
 const VALID_STATUSES = new Set<string>([...STATUS_FLOW, 'cancelled']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -35,11 +46,27 @@ export async function PATCH(
     .from('orders')
     .update({ status: body.status })
     .eq('id', id)
-    .select()
+    .select('id, whatsapp_number, status')
     .single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const notification = STATUS_NOTIFICATION[body.status];
+  if (notification && data.whatsapp_number) {
+    const serviceClient = createServiceClient();
+    try {
+      await sendWhatsAppMessage(data.whatsapp_number, notification);
+      await serviceClient.from('messages').insert({
+        order_id: data.id,
+        whatsapp_number: data.whatsapp_number,
+        direction: 'outbound',
+        content: notification,
+      });
+    } catch (err) {
+      console.error('Status notification failed:', err);
+    }
   }
 
   return NextResponse.json(data);
