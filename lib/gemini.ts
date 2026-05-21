@@ -29,20 +29,22 @@ Seu objetivo é ajudar o cliente a fazer o pedido de forma natural e amigável.
 Cardápio:
 ${MENU_TEXT}
 
-Instruções:
-- Seja simpático e use linguagem informal mas profissional
-- Ajude o cliente a escolher os itens do cardápio
-- Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
-- Quando tiver os itens definidos, confirme o pedido mostrando os itens e o total
-- Após o cliente confirmar (ex: "sim", "pode ser", "confirmo", "ok", "isso"), chame a função criar_pedido
-- Responda sempre em português brasileiro
-- Mantenha respostas curtas e objetivas, no estilo WhatsApp`;
+REGRAS OBRIGATÓRIAS:
+1. Nunca inclua código, XML, JSON ou sintaxe técnica nas suas respostas. Só texto simples.
+2. Fluxo de pedido tem DUAS etapas separadas:
+   - Etapa A: Quando souber todos os itens, mostre o resumo com valores e pergunte "Confirma?"
+   - Etapa B: SOMENTE quando o cliente responder confirmando (sim/isso/ok/confirmo/pode ser), aí chame a função criar_pedido
+3. NUNCA chame criar_pedido na mesma mensagem em que mostra o resumo
+4. NUNCA chame criar_pedido antes de o cliente confirmar
+5. Seja simpático e use linguagem informal no estilo WhatsApp
+6. Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
+7. Responda sempre em português brasileiro`;
 
 const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
   type: 'function',
   function: {
     name: 'criar_pedido',
-    description: 'Finaliza e registra o pedido no sistema após o cliente confirmar.',
+    description: 'Registra o pedido no sistema. Chamar SOMENTE após o cliente confirmar explicitamente.',
     parameters: {
       type: 'object',
       properties: {
@@ -77,6 +79,14 @@ export interface OrderData {
 
 type ChatMessage = Groq.Chat.Completions.ChatCompletionMessageParam;
 
+function cleanContent(text: string): string {
+  return text
+    .replace(/<function=\w+>[\s\S]*?<\/function>/g, '')
+    .replace(/\[TOOL_CALLS\][\s\S]*/g, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .trim();
+}
+
 export async function callGeminiAgent(
   history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   currentMessage: string,
@@ -106,29 +116,13 @@ export async function callGeminiAgent(
   if (message.tool_calls && message.tool_calls.length > 0) {
     const call = message.tool_calls[0];
     const orderData = JSON.parse(call.function.arguments) as OrderData;
-
-    // Get confirmation text with tool result
-    const completion2 = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        ...messages,
-        message,
-        {
-          role: 'tool',
-          tool_call_id: call.id,
-          content: JSON.stringify({ success: true }),
-        },
-      ],
-      temperature: 0.7,
-    });
-
     return {
-      text: completion2.choices[0].message.content ?? 'Pedido registrado! Em breve entraremos em contato.',
+      text: 'Pedido confirmado! Em breve entraremos em contato. 🍔',
       orderData,
     };
   }
 
-  return { text: message.content ?? 'Desculpe, não entendi. Pode repetir?', orderData: null };
+  return { text: cleanContent(message.content ?? 'Desculpe, não entendi. Pode repetir?'), orderData: null };
 }
 
 export { MENU_ITEMS };
