@@ -56,13 +56,24 @@ export async function POST(request: NextRequest) {
     // Customer has active order — log message silently, proactive notifications handle updates
   } else {
     // No active order — let LLM agent handle the conversation
+    // History starts from after the last order to avoid contaminating with old sessions
+    const { data: lastOrder } = await supabase
+      .from('orders')
+      .select('created_at')
+      .eq('whatsapp_number', from)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const sessionStart = lastOrder ? new Date(lastOrder.created_at) : today;
+
     const { data: previousMessages } = await supabase
       .from('messages')
       .select('direction, content')
       .eq('whatsapp_number', from)
-      .gte('created_at', today.toISOString())
+      .gt('created_at', sessionStart.toISOString())
       .order('created_at', { ascending: true })
-      .limit(30);
+      .limit(20);
 
     const history = (previousMessages ?? []).map((msg) => ({
       role: (msg.direction === 'inbound' ? 'user' : 'model') as 'user' | 'model',

@@ -56,6 +56,8 @@ export async function PATCH(
   }
 
   const notification = STATUS_NOTIFICATION[body.status];
+  let notificationError: string | null = null;
+
   if (notification && data.whatsapp_number) {
     try {
       await sendWhatsAppMessage(data.whatsapp_number, notification);
@@ -66,9 +68,12 @@ export async function PATCH(
         content: notification,
       });
     } catch (err) {
+      notificationError = String(err);
       console.error('Status notification failed:', err);
     }
+  } else {
+    notificationError = `skipped: notification=${!!notification} whatsapp_number=${data.whatsapp_number}`;
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, _notificationError: notificationError });
 }
