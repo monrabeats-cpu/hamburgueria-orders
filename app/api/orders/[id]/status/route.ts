@@ -56,24 +56,27 @@ export async function PATCH(
   }
 
   const notification = STATUS_NOTIFICATION[body.status];
-  let notificationError: string | null = null;
+  let notificationDebug: string;
 
-  if (notification && data.whatsapp_number) {
+  if (!notification) {
+    notificationDebug = `skipped: no message for status "${body.status}"`;
+  } else if (!data.whatsapp_number) {
+    notificationDebug = `skipped: whatsapp_number is empty on order`;
+  } else {
     try {
-      await sendWhatsAppMessage(data.whatsapp_number, notification);
+      const sid = await sendWhatsAppMessage(data.whatsapp_number, notification);
       await serviceClient.from('messages').insert({
         order_id: data.id,
         whatsapp_number: data.whatsapp_number,
         direction: 'outbound',
         content: notification,
       });
+      notificationDebug = `sent: sid=${sid} to=${data.whatsapp_number}`;
     } catch (err) {
-      notificationError = String(err);
+      notificationDebug = `error: ${String(err)}`;
       console.error('Status notification failed:', err);
     }
-  } else {
-    notificationError = `skipped: notification=${!!notification} whatsapp_number=${data.whatsapp_number}`;
   }
 
-  return NextResponse.json({ ...data, _notificationError: notificationError });
+  return NextResponse.json({ ...data, _notificationDebug: notificationDebug });
 }

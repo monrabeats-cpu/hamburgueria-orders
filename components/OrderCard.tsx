@@ -29,9 +29,7 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data._notificationError) {
-          alert(`Status atualizado, mas falha ao notificar cliente:\n${data._notificationError}`);
-        }
+        console.log('[notification]', data._notificationDebug);
         onStatusChange(order.id, status);
       }
     } finally {
@@ -42,6 +40,7 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
   const time = new Date(order.created_at).toLocaleTimeString('pt-BR', {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
   });
 
   return (
@@ -52,7 +51,7 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
           <p className="font-semibold text-slate-900 text-sm truncate mt-0.5">
             {order.customer_name ?? order.whatsapp_number}
           </p>
-          <p className="text-xs text-slate-400">{time}</p>
+          <p className="text-xs text-slate-400" suppressHydrationWarning>{time}</p>
         </div>
         <StatusBadge status={order.status} size="sm" />
       </div>

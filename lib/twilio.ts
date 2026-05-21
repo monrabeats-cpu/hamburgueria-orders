@@ -18,11 +18,12 @@ export function validateTwilioSignature(
   );
 }
 
-export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
+export async function sendWhatsAppMessage(to: string, body: string): Promise<string> {
   const from = process.env.TWILIO_WHATSAPP_NUMBER ?? '';
-  await client.messages.create({
+  const msg = await client.messages.create({
     from: from.startsWith('whatsapp:') ? from : `whatsapp:${from}`,
     to: `whatsapp:${to}`,
     body,
   });
+  return msg.sid;
 }
