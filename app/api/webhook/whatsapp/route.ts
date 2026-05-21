@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateTwilioSignature, sendWhatsAppMessage } from '@/lib/twilio';
+import { validateTwilioSignature } from '@/lib/twilio';
+import twilio from 'twilio';
 import { callGeminiAgent } from '@/lib/gemini';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
@@ -104,18 +105,19 @@ export async function POST(request: NextRequest) {
     content: messageBody,
   });
 
-  // Send reply and log outbound
-  try {
-    await sendWhatsAppMessage(from, replyBody);
-    await supabase.from('messages').insert({
-      order_id: targetOrderId,
-      whatsapp_number: from,
-      direction: 'outbound',
-      content: replyBody,
-    });
-  } catch (err) {
-    console.error('WhatsApp reply failed:', err);
-  }
+  // Log outbound message
+  await supabase.from('messages').insert({
+    order_id: targetOrderId,
+    whatsapp_number: from,
+    direction: 'outbound',
+    content: replyBody,
+  });
 
-  return new NextResponse(null, { status: 204 });
+  // Reply via TwiML (works in both Sandbox and production)
+  const twimlResponse = new twilio.twiml.MessagingResponse();
+  twimlResponse.message(replyBody);
+  return new NextResponse(twimlResponse.toString(), {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml' },
+  });
 }
