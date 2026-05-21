@@ -11,6 +11,7 @@ interface OrderCardProps {
 
 export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
   const [loading, setLoading] = useState(false);
+  const [notifStatus, setNotifStatus] = useState<'sent' | 'skipped' | 'error' | null>(null);
 
   const currentIndex = STATUS_FLOW.indexOf(order.status as OrderStatus);
   const nextStatus = currentIndex !== -1 && currentIndex < STATUS_FLOW.length - 1
@@ -28,8 +29,13 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
         body: JSON.stringify({ status }),
       });
       const data = await res.json();
-      alert(`Debug: ${data._notificationDebug}`);
-      if (res.ok) onStatusChange(order.id, status);
+      if (res.ok) {
+        const debug: string = data._notificationDebug ?? '';
+        if (debug.startsWith('sent')) setNotifStatus('sent');
+        else if (debug.startsWith('skipped')) setNotifStatus('skipped');
+        else setNotifStatus('error');
+        onStatusChange(order.id, status);
+      }
     } finally {
       setLoading(false);
     }
@@ -83,6 +89,17 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
       {order.total != null && (
         <p className="text-sm font-bold text-slate-900 mt-2">
           Total: R$ {order.total.toFixed(2)}
+        </p>
+      )}
+
+      {notifStatus && (
+        <p className={`text-xs mt-2 font-medium ${
+          notifStatus === 'sent' ? 'text-green-600' :
+          notifStatus === 'skipped' ? 'text-yellow-600' : 'text-red-600'
+        }`}>
+          {notifStatus === 'sent' && '✓ WhatsApp enviado'}
+          {notifStatus === 'skipped' && '⚠ Sem número no pedido'}
+          {notifStatus === 'error' && '✗ Falha ao enviar WhatsApp'}
         </p>
       )}
 
