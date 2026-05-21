@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, Content, FunctionDeclaration, SchemaType } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 
 const MENU_ITEMS: Record<string, number> = {
   'X-Burguer': 22.9,
@@ -38,30 +38,33 @@ Instruções:
 - Responda sempre em português brasileiro
 - Mantenha respostas curtas e objetivas, no estilo WhatsApp`;
 
-const criarPedidoDeclaration: FunctionDeclaration = {
-  name: 'criar_pedido',
-  description: 'Finaliza e registra o pedido no sistema após o cliente confirmar.',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      items: {
-        type: SchemaType.ARRAY,
-        description: 'Itens do pedido',
+const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'criar_pedido',
+    description: 'Finaliza e registra o pedido no sistema após o cliente confirmar.',
+    parameters: {
+      type: 'object',
+      properties: {
         items: {
-          type: SchemaType.OBJECT,
-          properties: {
-            name: { type: SchemaType.STRING, description: 'Nome do item' },
-            quantity: { type: SchemaType.NUMBER, description: 'Quantidade' },
-            price: { type: SchemaType.NUMBER, description: 'Preço unitário' },
+          type: 'array',
+          description: 'Itens do pedido',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome do item' },
+              quantity: { type: 'number', description: 'Quantidade' },
+              price: { type: 'number', description: 'Preço unitário' },
+            },
+            required: ['name', 'quantity', 'price'],
           },
-          required: ['name', 'quantity', 'price'],
         },
+        total: { type: 'number', description: 'Valor total do pedido' },
+        address: { type: 'string', description: 'Endereço de entrega, se informado' },
+        notes: { type: 'string', description: 'Observações como sem cebola, etc' },
       },
-      total: { type: SchemaType.NUMBER, description: 'Valor total do pedido' },
-      address: { type: SchemaType.STRING, description: 'Endereço de entrega, se informado' },
-      notes: { type: SchemaType.STRING, description: 'Observações como sem cebola, etc' },
+      required: ['items', 'total'],
     },
-    required: ['items', 'total'],
   },
 };
 
@@ -72,60 +75,60 @@ export interface OrderData {
   notes?: string;
 }
 
-function sanitizeHistory(history: Content[]): Content[] {
-  if (history.length === 0) return [];
-  // Gemini requires history to start with 'user' and alternate roles
-  const filtered: Content[] = [];
-  let expectedRole: 'user' | 'model' = 'user';
-  for (const msg of history) {
-    if (msg.role === expectedRole) {
-      filtered.push(msg);
-      expectedRole = expectedRole === 'user' ? 'model' : 'user';
-    }
-  }
-  // History must end with 'model' (last turn before current user message)
-  if (filtered.length > 0 && filtered[filtered.length - 1].role === 'user') {
-    filtered.pop();
-  }
-  return filtered;
-}
+type ChatMessage = Groq.Chat.Completions.ChatCompletionMessageParam;
 
 export async function callGeminiAgent(
-  history: Content[],
+  history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   currentMessage: string,
 ): Promise<{ text: string; orderData: OrderData | null }> {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash-latest',
-    systemInstruction: SYSTEM_PROMPT,
-    tools: [{ functionDeclarations: [criarPedidoDeclaration] }],
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...history.map((msg) => ({
+      role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
+      content: msg.parts[0]?.text ?? '',
+    })),
+    { role: 'user', content: currentMessage },
+  ];
+
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.1-8b-instant',
+    messages,
+    tools: [criarPedidoTool],
+    tool_choice: 'auto',
+    temperature: 0.7,
   });
 
-  const chat = model.startChat({ history: sanitizeHistory(history) });
-  const result = await chat.sendMessage(currentMessage);
-  const response = result.response;
+  const choice = completion.choices[0];
+  const message = choice.message;
 
-  const functionCalls = response.functionCalls();
-  if (functionCalls && functionCalls.length > 0) {
-    const call = functionCalls[0];
-    if (call.name === 'criar_pedido') {
-      const orderData = call.args as OrderData;
+  if (message.tool_calls && message.tool_calls.length > 0) {
+    const call = message.tool_calls[0];
+    const orderData = JSON.parse(call.function.arguments) as OrderData;
 
-      const result2 = await chat.sendMessage([
+    // Get confirmation text with tool result
+    const completion2 = await groq.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        ...messages,
+        message,
         {
-          functionResponse: {
-            name: 'criar_pedido',
-            response: { success: true },
-          },
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({ success: true }),
         },
-      ]);
+      ],
+      temperature: 0.7,
+    });
 
-      return { text: result2.response.text(), orderData };
-    }
+    return {
+      text: completion2.choices[0].message.content ?? 'Pedido registrado! Em breve entraremos em contato.',
+      orderData,
+    };
   }
 
-  return { text: response.text(), orderData: null };
+  return { text: message.content ?? 'Desculpe, não entendi. Pode repetir?', orderData: null };
 }
 
 export { MENU_ITEMS };
