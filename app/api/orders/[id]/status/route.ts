@@ -42,7 +42,9 @@ export async function PATCH(
     return NextResponse.json({ error: 'Status invalido' }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const serviceClient = createServiceClient();
+
+  const { data, error } = await serviceClient
     .from('orders')
     .update({ status: body.status })
     .eq('id', id)
@@ -55,7 +57,6 @@ export async function PATCH(
 
   const notification = STATUS_NOTIFICATION[body.status];
   if (notification && data.whatsapp_number) {
-    const serviceClient = createServiceClient();
     try {
       await sendWhatsAppMessage(data.whatsapp_number, notification);
       await serviceClient.from('messages').insert({
