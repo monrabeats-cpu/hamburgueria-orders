@@ -3,15 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus, STATUS_FLOW } from '@/lib/types';
 import { sendWhatsAppMessage } from '@/lib/twilio';
-
-const STATUS_NOTIFICATION: Partial<Record<OrderStatus, string>> = {
-  confirmed: 'Pedido confirmado! Em instantes começa o preparo. 👍',
-  preparing: 'Seu pedido está sendo preparado com carinho! 👨‍🍳',
-  ready: 'Pedido pronto! Já vamos chamar o entregador. ✅',
-  out_for_delivery: 'Seu pedido saiu para entrega! Chega em breve. 🛵',
-  delivered: 'Pedido entregue! Obrigado por pedir na Hamburgueria. Volte sempre! 😊',
-  cancelled: 'Seu pedido foi cancelado. Qualquer dúvida, é só chamar.',
-};
+import { getNotificationMessage } from '@/lib/notifications';
 
 const VALID_STATUSES = new Set<string>([...STATUS_FLOW, 'cancelled']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -55,7 +47,7 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const notification = STATUS_NOTIFICATION[body.status];
+  const notification = getNotificationMessage(body.status);
   let notificationDebug: string;
 
   if (!notification) {

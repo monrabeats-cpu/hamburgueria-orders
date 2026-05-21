@@ -4,6 +4,7 @@ import twilio from 'twilio';
 import { callGeminiAgent } from '@/lib/gemini';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
+import { getActiveOrderReply } from '@/lib/notifications';
 
 const STATUS_REPLY: Record<string, string> = {
   received: 'Seu pedido foi recebido e aguarda confirmacao!',
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
   let targetOrderId: string | null = activeOrder?.id ?? null;
 
   if (activeOrder) {
-    // Customer has active order — log message silently, proactive notifications handle updates
+    replyBody = getActiveOrderReply(activeOrder.status as OrderStatus);
   } else {
     // No active order — let LLM agent handle the conversation
     // History starts from after the last order to avoid contaminating with old sessions
