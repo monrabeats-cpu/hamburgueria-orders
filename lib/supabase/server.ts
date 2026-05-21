@@ -1,7 +1,5 @@
-import { createServerClient, type CookieMethodsServer } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-
-type CookieToSet = Parameters<CookieMethodsServer['setAll']>[0][number];
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -14,7 +12,7 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet: CookieToSet[]) {
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
@@ -26,7 +24,6 @@ export async function createClient() {
   );
 }
 
-// Service role client — bypasses RLS, use only in server-side webhook handlers
 export function createServiceClient() {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
