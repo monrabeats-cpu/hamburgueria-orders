@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { OrderStatus, STATUS_FLOW } from '@/lib/types';
+import { OrderStatus, STATUS_FLOW, STATUS_MESSAGES } from '@/lib/types';
+import { sendWhatsAppMessage } from '@/lib/twilio';
 
 const VALID_STATUSES = new Set<string>([...STATUS_FLOW, 'cancelled']);
 
@@ -34,6 +35,13 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const message = STATUS_MESSAGES[body.status];
+  if (message && data.whatsapp_number) {
+    sendWhatsAppMessage(data.whatsapp_number, message).catch((err) => {
+      console.error('[WhatsApp] Falha ao enviar notificação:', err);
+    });
   }
 
   return NextResponse.json(data);

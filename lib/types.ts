@@ -45,6 +45,15 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   cancelled: 'Cancelado',
 };
 
+export const STATUS_MESSAGES: Partial<Record<OrderStatus, string>> = {
+  confirmed: 'Oba! Seu pedido foi confirmado e em instantes entra em preparo. 🍔',
+  preparing: 'Seu pedido está sendo preparado com muito carinho! 👨‍🍳',
+  ready: 'Seu pedido está pronto! Aguardando o entregador. 📦',
+  out_for_delivery: 'Seu pedido saiu para entrega! Chegará em breve. 🛵',
+  delivered: 'Pedido entregue! Obrigado pela preferência. Volte sempre! 😊',
+  cancelled: 'Seu pedido foi cancelado. Em caso de dúvidas, entre em contato conosco.',
+};
+
 export const STATUS_COLORS: Record<OrderStatus, string> = {
   received: 'bg-blue-100 text-blue-800',
   confirmed: 'bg-indigo-100 text-indigo-800',
