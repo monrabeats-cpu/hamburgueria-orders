@@ -27,7 +27,13 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) onStatusChange(order.id, status);
+      if (res.ok) {
+        const data = await res.json();
+        if (data._notificationError) {
+          alert(`Status atualizado, mas falha ao notificar cliente:\n${data._notificationError}`);
+        }
+        onStatusChange(order.id, status);
+      }
     } finally {
       setLoading(false);
     }
