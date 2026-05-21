@@ -117,5 +117,5 @@ export async function POST(request: NextRequest) {
     console.error('WhatsApp reply failed:', err);
   }
 
-  return new NextResponse('OK', { status: 200 });
+  return new NextResponse(null, { status: 204 });
 }
