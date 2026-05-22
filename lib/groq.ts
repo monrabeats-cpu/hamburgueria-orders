@@ -87,7 +87,7 @@ function cleanContent(text: string): string {
     .trim();
 }
 
-export async function callGeminiAgent(
+export async function callGroqAgent(
   history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   currentMessage: string,
   lastOrder?: { items: { name: string; quantity: number; price: number }[]; total: number } | null,

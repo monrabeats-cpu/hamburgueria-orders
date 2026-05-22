@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateTwilioSignature } from '@/lib/twilio';
 import twilio from 'twilio';
-import { callGeminiAgent } from '@/lib/gemini';
+import { callGroqAgent } from '@/lib/groq';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
 import { getActiveOrderReply } from '@/lib/notifications';
-
-const STATUS_REPLY: Record<string, string> = {
-  received: 'Seu pedido foi recebido e aguarda confirmacao!',
-  confirmed: 'Pedido confirmado! Entrara em preparo em instantes.',
-  preparing: 'Seu pedido esta sendo preparado com muito cuidado!',
-  ready: 'Pedido pronto! Aguardando o entregador.',
-  out_for_delivery: 'Seu pedido saiu para entrega. Chegara em breve!',
-};
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -22,6 +14,7 @@ export async function POST(request: NextRequest) {
     const signature = request.headers.get('x-twilio-signature') ?? '';
     const url = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/whatsapp`;
     if (!validateTwilioSignature(signature, url, params)) {
+      console.error('Twilio signature invalid. URL used:', url);
       return new NextResponse('Unauthorized', { status: 401 });
     }
   }
@@ -39,7 +32,6 @@ export async function POST(request: NextRequest) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Check if customer already has an active order today
   const { data: activeOrder } = await supabase
     .from('orders')
     .select('id, status')
@@ -56,8 +48,6 @@ export async function POST(request: NextRequest) {
   if (activeOrder) {
     replyBody = getActiveOrderReply(activeOrder.status as OrderStatus);
   } else {
-    // No active order — let LLM agent handle the conversation
-    // History starts from after the last order to avoid contaminating with old sessions
     const { data: lastOrder } = await supabase
       .from('orders')
       .select('created_at, items, total')
@@ -86,7 +76,7 @@ export async function POST(request: NextRequest) {
       : null;
 
     try {
-      const { text, orderData } = await callGeminiAgent(history, messageBody, lastOrderContext);
+      const { text, orderData } = await callGroqAgent(history, messageBody, lastOrderContext);
       replyBody = text;
 
       if (orderData) {
@@ -117,23 +107,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Log inbound message
-  await supabase.from('messages').insert({
+  // Log inbound message (non-blocking — never crash the webhook on DB errors)
+  supabase.from('messages').insert({
     order_id: targetOrderId,
     whatsapp_number: from,
     direction: 'inbound',
     content: messageBody,
-  });
+  }).then(({ error }) => { if (error) console.error('Message log failed (inbound):', error); });
 
   const twimlResponse = new twilio.twiml.MessagingResponse();
 
   if (replyBody) {
-    await supabase.from('messages').insert({
+    supabase.from('messages').insert({
       order_id: targetOrderId,
       whatsapp_number: from,
       direction: 'outbound',
       content: replyBody,
-    });
+    }).then(({ error }) => { if (error) console.error('Message log failed (outbound):', error); });
+
     twimlResponse.message(replyBody);
   }
 
