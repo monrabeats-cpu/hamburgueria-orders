@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { MENU_ITEMS } from '../lib/gemini';
+import { MENU_ITEMS } from '../lib/groq';
 
-// Tests for the menu data and sanitizeHistory logic
-// (callGeminiAgent requires a real API key — tested via integration)
+// Tests for the menu data
+// (callGroqAgent requires a real API key — tested via integration)
 
 describe('MENU_ITEMS', () => {
   it('contains expected items', () => {
