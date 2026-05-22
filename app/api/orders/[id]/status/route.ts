@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus, STATUS_FLOW } from '@/lib/types';
 import { sendWhatsAppMessage } from '@/lib/twilio';
 import { getNotificationMessage } from '@/lib/notifications';
