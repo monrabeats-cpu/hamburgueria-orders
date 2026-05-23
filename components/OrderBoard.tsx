@@ -13,9 +13,8 @@ const BOARD_STATUSES = STATUS_FLOW.filter((s) => s !== 'delivered') as OrderStat
 
 const COLUMN_ACCENT: Record<string, string> = {
   received: 'border-t-blue-400',
-  confirmed: 'border-t-indigo-400',
+  pago: 'border-t-emerald-400',
   preparing: 'border-t-amber-400',
-  ready: 'border-t-green-400',
   out_for_delivery: 'border-t-orange-400',
 };
 
@@ -31,7 +30,7 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
     const { data } = await supabase
       .from('orders')
       .select('*')
-      .not('status', 'in', '("delivered","cancelled")')
+      .not('status', 'in', '("delivered","cancelled","aguardando_pagamento","expirado")')
       .gte('created_at', today.toISOString())
       .order('created_at', { ascending: false });
     if (data) setOrders(data as Order[]);
@@ -127,7 +126,7 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
         {BOARD_STATUSES.map((status) => {
           const col = byStatus(status);
           return (

@@ -5,6 +5,7 @@ import { callGroqAgent } from '@/lib/groq';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
 import { getActiveOrderReply } from '@/lib/notifications';
+import { createOrderWithPix } from '@/lib/orderService';
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     .from('orders')
     .select('id, status')
     .eq('whatsapp_number', from)
-    .not('status', 'in', '("delivered","cancelled")')
+    .not('status', 'in', '("delivered","cancelled","expirado")')
     .gte('created_at', today.toISOString())
     .order('created_at', { ascending: false })
     .limit(1)
@@ -80,25 +81,60 @@ export async function POST(request: NextRequest) {
       replyBody = text;
 
       if (orderData) {
-        const { data: newOrder, error } = await supabase
-          .from('orders')
-          .insert({
-            whatsapp_number: from,
-            customer_name: profileName,
+        try {
+          const result = await createOrderWithPix({
+            whatsappNumber: from,
+            customerName: profileName,
             items: orderData.items,
             total: orderData.total,
-            status: 'received',
             address: orderData.address ?? null,
             notes: orderData.notes ?? null,
-          })
-          .select('id')
-          .single();
+          });
 
-        if (error || !newOrder) {
-          console.error('Order insert failed:', error);
-          replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
-        } else {
-          targetOrderId = newOrder.id;
+          targetOrderId = result.orderId;
+
+          const expiresIn = Math.round(
+            (new Date(result.pix.expiresAt).getTime() - Date.now()) / 60000,
+          );
+
+          replyBody = [
+            `🍔 *Pedido recebido!*`,
+            ``,
+            `*Total: R$ ${orderData.total.toFixed(2).replace('.', ',')}*`,
+            ``,
+            `📱 *PIX Copia e Cola:*`,
+            result.pix.copiaECola,
+            ``,
+            `⏰ Expira em ${expiresIn} minuto${expiresIn !== 1 ? 's' : ''}`,
+            ``,
+            `Após o pagamento, seu pedido entrará em preparo automaticamente! ✅`,
+          ].join('\n');
+        } catch (pixErr) {
+          // PIX failed — fall back to creating a regular order so it isn't lost
+          console.error('PIX creation failed, falling back to regular order:', pixErr);
+
+          const { data: newOrder, error: orderError } = await supabase
+            .from('orders')
+            .insert({
+              whatsapp_number: from,
+              customer_name: profileName,
+              items: orderData.items,
+              total: orderData.total,
+              status: 'received',
+              address: orderData.address ?? null,
+              notes: orderData.notes ?? null,
+            })
+            .select('id')
+            .single();
+
+          if (orderError || !newOrder) {
+            console.error('Fallback order insert failed:', orderError);
+            replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
+          } else {
+            targetOrderId = newOrder.id;
+            replyBody =
+              'Pedido confirmado! 🍔 Houve uma instabilidade no PIX, mas seu pedido foi registrado. Nossa equipe entrará em contato para combinar o pagamento.';
+          }
         }
       }
     } catch (err) {

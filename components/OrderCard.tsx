@@ -20,6 +20,14 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
 
   const isTerminal = order.status === 'delivered' || order.status === 'cancelled';
 
+  // Button labels — override for actions that need more context than the column name
+  const ADVANCE_LABELS: Partial<Record<OrderStatus, string>> = {
+    pago: '✓ Confirmar Pagamento',
+    preparing: '👨‍🍳 Iniciar Preparo',
+    out_for_delivery: '🛵 Saiu para Entrega',
+    delivered: '✓ Entregue',
+  };
+
   async function updateStatus(status: OrderStatus) {
     setLoading(true);
     try {
@@ -112,7 +120,7 @@ export default function OrderCard({ order, onStatusChange }: OrderCardProps) {
               disabled={loading}
               className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-200 text-white text-xs font-semibold py-2 rounded-lg transition-colors"
             >
-              {loading ? '...' : STATUS_LABELS[nextStatus]}
+              {loading ? '...' : (ADVANCE_LABELS[nextStatus] ?? STATUS_LABELS[nextStatus])}
             </button>
           )}
           <button

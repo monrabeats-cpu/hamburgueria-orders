@@ -4,7 +4,14 @@ import { OrderStatus, STATUS_FLOW } from '@/lib/types';
 import { sendWhatsAppMessage } from '@/lib/twilio';
 import { getNotificationMessage } from '@/lib/notifications';
 
-const VALID_STATUSES = new Set<string>([...STATUS_FLOW, 'cancelled']);
+const VALID_STATUSES = new Set<string>([
+  ...STATUS_FLOW,
+  'cancelled',
+  'aguardando_pagamento',
+  'expirado',
+  'confirmed',
+  'ready',
+]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function PATCH(
