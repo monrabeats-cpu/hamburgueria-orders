@@ -125,6 +125,15 @@ export async function POST(request: NextRequest) {
 
   const twimlResponse = new twilio.twiml.MessagingResponse();
 
+  console.log(JSON.stringify({
+    event: 'twiml_building',
+    hasReply: !!replyBody,
+    replyLength: replyBody?.length ?? 0,
+    replyPreview: replyBody?.slice(0, 80) ?? null,
+    targetOrderId,
+    from: from.slice(0, 6) + '****',
+  }));
+
   if (replyBody) {
     supabase
       .from('messages')
@@ -141,7 +150,10 @@ export async function POST(request: NextRequest) {
     twimlResponse.message(replyBody);
   }
 
-  return new NextResponse(twimlResponse.toString(), {
+  const twimlStr = twimlResponse.toString();
+  console.log(JSON.stringify({ event: 'twiml_response', xml: twimlStr }));
+
+  return new NextResponse(twimlStr, {
     status: 200,
     headers: { 'Content-Type': 'text/xml' },
   });
