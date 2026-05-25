@@ -1,9 +1,11 @@
 import twilio from 'twilio';
 
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN,
-);
+function getClient() {
+  return twilio(
+    process.env.TWILIO_ACCOUNT_SID,
+    process.env.TWILIO_AUTH_TOKEN,
+  );
+}
 
 export function validateTwilioSignature(
   signature: string,
@@ -18,10 +20,12 @@ export function validateTwilioSignature(
   );
 }
 
-export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
-  await client.messages.create({
-    from: process.env.TWILIO_WHATSAPP_NUMBER,
+export async function sendWhatsAppMessage(to: string, body: string): Promise<string> {
+  const from = process.env.TWILIO_WHATSAPP_NUMBER ?? '';
+  const msg = await getClient().messages.create({
+    from: from.startsWith('whatsapp:') ? from : `whatsapp:${from}`,
     to: `whatsapp:${to}`,
     body,
   });
+  return msg.sid;
 }

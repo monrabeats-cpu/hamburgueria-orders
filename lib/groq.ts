@@ -1,0 +1,155 @@
+import Groq from 'groq-sdk';
+
+const MENU_ITEMS: Record<string, number> = {
+  'X-Burguer': 22.9,
+  'X-Bacon': 27.9,
+  'X-Salada': 19.9,
+  'X-Frango': 24.9,
+  'X-Vegano': 26.9,
+  'Batata Frita P': 8.9,
+  'Batata Frita M': 12.9,
+  'Batata Frita G': 16.9,
+  'Onion Rings': 15.9,
+  'Coca-Cola Lata': 6.0,
+  'Coca-Cola 600ml': 8.0,
+  'Suco Laranja': 7.9,
+  'Suco Limao': 7.9,
+  'Agua': 4.0,
+  'Milk Shake': 18.9,
+  'Cerveja': 9.9,
+};
+
+const MENU_TEXT = Object.entries(MENU_ITEMS)
+  .map(([name, price]) => `- ${name}: R$ ${price.toFixed(2).replace('.', ',')}`)
+  .join('\n');
+
+const SYSTEM_PROMPT = `Você é um atendente simpático de uma hamburgueria chamada "Hamburgueria" atendendo pelo WhatsApp.
+Seu objetivo é ajudar o cliente a fazer o pedido de forma natural e amigável.
+
+Cardápio:
+${MENU_TEXT}
+
+REGRAS OBRIGATÓRIAS:
+1. Nunca inclua código, XML, JSON ou sintaxe técnica nas suas respostas. Só texto simples.
+2. Fluxo de pedido em etapas separadas:
+   - Etapa A: Colete todos os itens e quantidades desejadas
+   - Etapa B: Após ter os itens, pergunte se é ENTREGA ou RETIRADA na loja
+     - Se ENTREGA: peça endereço completo (rua, número, bairro/referência)
+     - Se RETIRADA: confirme que será retirado na loja
+   - Etapa C: Mostre resumo (itens e valores) e pergunte "Confirma?"
+   - Etapa D: SOMENTE após confirmação explícita do cliente, chame a função criar_pedido
+3. NUNCA chame criar_pedido na mesma mensagem em que mostra o resumo
+4. NUNCA chame criar_pedido antes de o cliente confirmar explicitamente (sim/isso/ok/confirmo/pode ser)
+5. NÃO mencione taxa de entrega, frete ou valores de entrega — o restaurante define isso internamente
+6. NÃO calcule nem informe taxa de entrega ao cliente
+7. O resumo deve mostrar apenas o subtotal dos itens, sem taxa
+8. Seja simpático e use linguagem informal no estilo WhatsApp
+9. Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
+10. Responda sempre em português brasileiro`;
+
+const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: 'criar_pedido',
+    description: 'Registra o pedido no sistema. Chamar SOMENTE após o cliente confirmar explicitamente.',
+    parameters: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Itens do pedido',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome do item' },
+              quantity: { type: 'number', description: 'Quantidade' },
+              price: { type: 'number', description: 'Preço unitário' },
+            },
+            required: ['name', 'quantity', 'price'],
+          },
+        },
+        total: {
+          type: 'number',
+          description: 'Subtotal dos itens (SEM taxa de entrega)',
+        },
+        delivery_type: {
+          type: 'string',
+          enum: ['entrega', 'retirada'],
+          description: 'Entrega no endereço ou retirada na loja',
+        },
+        address: {
+          type: 'string',
+          description: 'Endereço completo de entrega (obrigatório se delivery_type = entrega)',
+        },
+        notes: {
+          type: 'string',
+          description: 'Observações como sem cebola, ponto da carne, etc',
+        },
+      },
+      required: ['items', 'total', 'delivery_type'],
+    },
+  },
+};
+
+export interface OrderData {
+  items: { name: string; quantity: number; price: number }[];
+  total: number;
+  delivery_type: 'entrega' | 'retirada';
+  address?: string;
+  notes?: string;
+}
+
+type ChatMessage = Groq.Chat.Completions.ChatCompletionMessageParam;
+
+function cleanContent(text: string): string {
+  return text
+    .replace(/<function=\w+>[\s\S]*?<\/function>/g, '')
+    .replace(/\[TOOL_CALLS\][\s\S]*/g, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .trim();
+}
+
+export async function callGroqAgent(
+  history: { role: 'user' | 'model'; parts: { text: string }[] }[],
+  currentMessage: string,
+  lastOrder?: { items: { name: string; quantity: number; price: number }[]; total: number } | null,
+): Promise<{ text: string; orderData: OrderData | null }> {
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+  const lastOrderNote = lastOrder
+    ? `\nÚltimo pedido do cliente: ${lastOrder.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')} — Subtotal: R$ ${lastOrder.total.toFixed(2).replace('.', ',')}`
+    : '';
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SYSTEM_PROMPT + lastOrderNote },
+    ...history.map((msg) => ({
+      role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
+      content: msg.parts[0]?.text ?? '',
+    })),
+    { role: 'user', content: currentMessage },
+  ];
+
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages,
+    tools: [criarPedidoTool],
+    tool_choice: 'auto',
+    temperature: 0.7,
+  });
+
+  const choice = completion.choices[0];
+  const message = choice.message;
+
+  if (message.tool_calls && message.tool_calls.length > 0) {
+    const call = message.tool_calls[0];
+    const orderData = JSON.parse(call.function.arguments) as OrderData;
+    return {
+      text: 'Pedido recebido! 🍔 Em breve nossa equipe confirma e te envia o link de pagamento.',
+      orderData,
+    };
+  }
+
+  return { text: cleanContent(message.content ?? 'Desculpe, não entendi. Pode repetir?'), orderData: null };
+}
+
+export { MENU_ITEMS };

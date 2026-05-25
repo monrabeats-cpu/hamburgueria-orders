@@ -1,26 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateTwilioSignature, sendWhatsAppMessage } from '@/lib/twilio';
-import { parseOrder, formatOrderConfirmation } from '@/lib/order-parser';
+import { validateTwilioSignature } from '@/lib/twilio';
+import twilio from 'twilio';
+import { callGroqAgent } from '@/lib/groq';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
-
-const STATUS_REPLY: Record<string, string> = {
-  received: 'Seu pedido foi recebido e aguarda confirmacao!',
-  confirmed: 'Pedido confirmado! Entrara em preparo em instantes.',
-  preparing: 'Seu pedido esta sendo preparado com muito cuidado!',
-  ready: 'Pedido pronto! Aguardando o entregador.',
-  out_for_delivery: 'Seu pedido saiu para entrega. Chegara em breve!',
-};
+import { getActiveOrderReply } from '@/lib/notifications';
+import { createReviewOrder } from '@/lib/orderService';
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const params = Object.fromEntries(new URLSearchParams(rawBody));
 
-  // Validate Twilio signature in production
   if (process.env.NODE_ENV === 'production') {
     const signature = request.headers.get('x-twilio-signature') ?? '';
     const url = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/whatsapp`;
     if (!validateTwilioSignature(signature, url, params)) {
+      console.error('Twilio signature invalid. URL used:', url);
       return new NextResponse('Unauthorized', { status: 401 });
     }
   }
@@ -35,7 +30,6 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Check if customer already has an active order today
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -43,67 +37,110 @@ export async function POST(request: NextRequest) {
     .from('orders')
     .select('id, status')
     .eq('whatsapp_number', from)
-    .not('status', 'in', '("delivered","cancelled")')
+    .not('status', 'in', '("delivered","cancelled","expirado")')
     .gte('created_at', today.toISOString())
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  let replyBody: string;
+  let replyBody: string | null = null;
   let targetOrderId: string | null = activeOrder?.id ?? null;
 
   if (activeOrder) {
-    replyBody = STATUS_REPLY[activeOrder.status as OrderStatus] ?? 'Processando seu pedido...';
+    replyBody = getActiveOrderReply(activeOrder.status as OrderStatus);
   } else {
-    const parsed = parseOrder(messageBody);
-
-    const { data: newOrder, error } = await supabase
+    const { data: lastOrder } = await supabase
       .from('orders')
-      .insert({
-        whatsapp_number: from,
-        customer_name: profileName,
-        items: parsed.items,
-        total: parsed.total > 0 ? parsed.total : null,
-        status: 'received',
-        address: parsed.address,
-        notes: parsed.notes,
-      })
-      .select('id')
-      .single();
+      .select('created_at, items, total')
+      .eq('whatsapp_number', from)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (error || !newOrder) {
-      console.error('Order insert failed:', error);
-      return new NextResponse('Internal Error', { status: 500 });
+    const sessionStart = lastOrder ? new Date(lastOrder.created_at) : today;
+
+    const { data: previousMessages } = await supabase
+      .from('messages')
+      .select('direction, content')
+      .eq('whatsapp_number', from)
+      .gt('created_at', sessionStart.toISOString())
+      .order('created_at', { ascending: true })
+      .limit(20);
+
+    const history = (previousMessages ?? []).map((msg) => ({
+      role: (msg.direction === 'inbound' ? 'user' : 'model') as 'user' | 'model',
+      parts: [{ text: msg.content }],
+    }));
+
+    const lastOrderContext = lastOrder
+      ? { items: lastOrder.items as { name: string; quantity: number; price: number }[], total: lastOrder.total as number }
+      : null;
+
+    try {
+      const { text, orderData } = await callGroqAgent(history, messageBody, lastOrderContext);
+      replyBody = text;
+
+      if (orderData) {
+        try {
+          const result = await createReviewOrder({
+            whatsappNumber: from,
+            customerName: profileName,
+            items: orderData.items,
+            total: orderData.total,
+            deliveryType: orderData.delivery_type,
+            address: orderData.address ?? null,
+            notes: orderData.notes ?? null,
+          });
+
+          targetOrderId = result.orderId;
+
+          const deliveryLine = orderData.delivery_type === 'retirada'
+            ? '📦 Retirada na loja'
+            : `🛵 Entrega — ${orderData.address ?? 'endereço confirmado'}`;
+
+          replyBody = [
+            `🍔 *Pedido recebido!*`,
+            ``,
+            deliveryLine,
+            ``,
+            `*Subtotal: R$ ${orderData.total.toFixed(2).replace('.', ',')}*`,
+            ``,
+            `Nossa equipe vai revisar e te enviar o código PIX em instantes! ✅`,
+          ].join('\n');
+        } catch (err) {
+          console.error('Review order creation failed:', err);
+          replyBody = 'Desculpe, ocorreu um erro ao registrar seu pedido. Tente novamente.';
+        }
+      }
+    } catch (err) {
+      console.error('LLM error:', err);
+      replyBody = 'Olá! Estou com uma instabilidade agora. Por favor, tente novamente em instantes. 🙏';
     }
-
-    targetOrderId = newOrder.id;
-    replyBody = formatOrderConfirmation(parsed.items, parsed.total);
   }
 
-  // Log inbound message
-  if (targetOrderId) {
-    await supabase.from('messages').insert({
+  // Log inbound message (non-blocking — never crash the webhook on DB errors)
+  supabase.from('messages').insert({
+    order_id: targetOrderId,
+    whatsapp_number: from,
+    direction: 'inbound',
+    content: messageBody,
+  }).then(({ error }) => { if (error) console.error('Message log failed (inbound):', error); });
+
+  const twimlResponse = new twilio.twiml.MessagingResponse();
+
+  if (replyBody) {
+    supabase.from('messages').insert({
       order_id: targetOrderId,
       whatsapp_number: from,
-      direction: 'inbound',
-      content: messageBody,
-    });
+      direction: 'outbound',
+      content: replyBody,
+    }).then(({ error }) => { if (error) console.error('Message log failed (outbound):', error); });
+
+    twimlResponse.message(replyBody);
   }
 
-  // Send reply and log outbound
-  try {
-    await sendWhatsAppMessage(from, replyBody);
-    if (targetOrderId) {
-      await supabase.from('messages').insert({
-        order_id: targetOrderId,
-        whatsapp_number: from,
-        direction: 'outbound',
-        content: replyBody,
-      });
-    }
-  } catch (err) {
-    console.error('WhatsApp reply failed:', err);
-  }
-
-  return new NextResponse('OK', { status: 200 });
+  return new NextResponse(twimlResponse.toString(), {
+    status: 200,
+    headers: { 'Content-Type': 'text/xml' },
+  });
 }

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(node scripts/test-webhook.mjs \"Quero um X-Burguer e uma Coca-Cola Lata\")",
+      "Bash(npm run *)",
+      "Bash(npx next *)",
+      "Bash(npx eslint *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
