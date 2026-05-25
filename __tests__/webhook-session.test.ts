@@ -247,7 +247,9 @@ describe('Webhook active order handling', () => {
     expect(response.status).toBe(200);
   });
 
-  it('returns 400 when From is missing', async () => {
+  it('returns 200 (not 400) when From is missing — Twilio status callback', async () => {
+    // Twilio sends status callbacks (delivery/read receipts) to the same endpoint
+    // without a From field. We must return 200 or Twilio will keep retrying.
     vi.doMock('@/lib/supabase/server', () => makeSupabaseMock(null));
     vi.doMock('@/lib/groq', () => ({ callGroqAgent: vi.fn() }));
     vi.doMock('@/lib/orderService', () => ({ createReviewOrder: vi.fn() }));
@@ -260,7 +262,25 @@ describe('Webhook active order handling', () => {
       makeRequest(new URLSearchParams({ Body: 'oi' }).toString()) as never,
       undefined as never,
     );
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+  });
+
+  it('returns 200 when Body is missing — status callback without message body', async () => {
+    vi.doMock('@/lib/supabase/server', () => makeSupabaseMock(null));
+    vi.doMock('@/lib/groq', () => ({ callGroqAgent: vi.fn() }));
+    vi.doMock('@/lib/orderService', () => ({ createReviewOrder: vi.fn() }));
+    vi.doMock('@/lib/notifications', () => ({ getActiveOrderReply: vi.fn() }));
+    vi.doMock('@/lib/twilio', () => ({ validateTwilioSignature: vi.fn() }));
+    vi.doMock('twilio', () => makeTwilioMock());
+
+    const { POST } = await import('../app/api/webhook/whatsapp/route');
+    const response = await POST(
+      makeRequest(
+        new URLSearchParams({ From: 'whatsapp:+5511999999999', MessageStatus: 'delivered' }).toString(),
+      ) as never,
+      undefined as never,
+    );
+    expect(response.status).toBe(200);
   });
 });
 

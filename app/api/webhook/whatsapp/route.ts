@@ -25,7 +25,9 @@ export async function POST(request: NextRequest) {
   const profileName = params.ProfileName ?? null;
 
   if (!from || !messageBody) {
-    return new NextResponse('Bad Request', { status: 400 });
+    // Twilio status callbacks (delivery receipts, read events) hit this endpoint
+    // without From/Body — acknowledge them with 200 to prevent Twilio retries
+    return new NextResponse('OK', { status: 200 });
   }
 
   const supabase = createServiceClient();
