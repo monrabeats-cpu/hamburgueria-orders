@@ -1,33 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateTwilioSignature } from '@/lib/twilio';
-import twilio from 'twilio';
-import { callGroqAgent } from '@/lib/groq';
+import { callGroqAgent, transcribeAudio } from '@/lib/groq';
 import { createServiceClient } from '@/lib/supabase/server';
 import { OrderStatus } from '@/lib/types';
 import { getActiveOrderReply } from '@/lib/notifications';
 import { createReviewOrder } from '@/lib/orderService';
+import { sendZApiMessage } from '@/lib/zapi';
+
+interface ZApiPayload {
+  phone?: string;
+  fromMe?: boolean;
+  senderName?: string;
+  type?: string;
+  text?: { message: string };
+  audio?: { audioUrl: string; mimeType: string; seconds: number };
+}
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-  const params = Object.fromEntries(new URLSearchParams(rawBody));
+  let payload: ZApiPayload;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ status: 'ok' });
+  }
 
-  if (process.env.NODE_ENV === 'production') {
-    const signature = request.headers.get('x-twilio-signature') ?? '';
-    const url = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook/whatsapp`;
-    if (!validateTwilioSignature(signature, url, params)) {
-      console.error('Twilio signature invalid. URL used:', url);
-      return new NextResponse('Unauthorized', { status: 401 });
+  // Ignore outbound echoes and non-message events
+  if (payload.fromMe || payload.type !== 'ReceivedCallback') {
+    return NextResponse.json({ status: 'ok' });
+  }
+
+  const from = payload.phone ?? '';
+  const profileName = payload.senderName ?? null;
+
+  // Resolve message text — audio takes priority over text if present
+  let messageBody = payload.text?.message ?? '';
+  if (!messageBody && payload.audio?.audioUrl) {
+    try {
+      messageBody = await transcribeAudio(payload.audio.audioUrl);
+      console.log(JSON.stringify({ event: 'audio_transcribed', chars: messageBody.length }));
+    } catch (err) {
+      console.error('Audio transcription failed:', err);
     }
   }
 
-  const from = (params.From ?? '').replace('whatsapp:', '');
-  const messageBody = params.Body ?? '';
-  const profileName = params.ProfileName ?? null;
-
   if (!from || !messageBody) {
-    // Twilio status callbacks (delivery receipts, read events) hit this endpoint
-    // without From/Body — acknowledge them with 200 to prevent Twilio retries
-    return new NextResponse('OK', { status: 200 });
+    return NextResponse.json({ status: 'ok' });
   }
 
   const supabase = createServiceClient();
@@ -53,7 +69,6 @@ export async function POST(request: NextRequest) {
     replyBody = getActiveOrderReply(activeOrder.status as OrderStatus);
   } else {
     // Load only today's messages — prevents old conversations from polluting context
-    // and causing the LLM to reference items from previous sessions
     const { data: previousMessages } = await supabase
       .from('messages')
       .select('direction, content')
@@ -123,17 +138,6 @@ export async function POST(request: NextRequest) {
       if (error) console.error('Message log failed (inbound):', error);
     });
 
-  const twimlResponse = new twilio.twiml.MessagingResponse();
-
-  console.log(JSON.stringify({
-    event: 'twiml_building',
-    hasReply: !!replyBody,
-    replyLength: replyBody?.length ?? 0,
-    replyPreview: replyBody?.slice(0, 80) ?? null,
-    targetOrderId,
-    from: from.slice(0, 6) + '****',
-  }));
-
   if (replyBody) {
     supabase
       .from('messages')
@@ -147,14 +151,12 @@ export async function POST(request: NextRequest) {
         if (error) console.error('Message log failed (outbound):', error);
       });
 
-    twimlResponse.message(replyBody);
+    try {
+      await sendZApiMessage(from, replyBody);
+    } catch (err) {
+      console.error('Z-API send failed:', err);
+    }
   }
 
-  const twimlStr = twimlResponse.toString();
-  console.log(JSON.stringify({ event: 'twiml_response', xml: twimlStr }));
-
-  return new NextResponse(twimlStr, {
-    status: 200,
-    headers: { 'Content-Type': 'text/xml' },
-  });
+  return NextResponse.json({ status: 'ok' });
 }

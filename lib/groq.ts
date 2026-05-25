@@ -162,4 +162,22 @@ export async function callGroqAgent(
   return { text: cleaned || 'Desculpe, não entendi. Pode repetir?', orderData: null };
 }
 
+export async function transcribeAudio(audioUrl: string): Promise<string> {
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+  const audioRes = await fetch(audioUrl);
+  if (!audioRes.ok) throw new Error(`Failed to fetch audio: ${audioRes.status}`);
+
+  const arrayBuffer = await audioRes.arrayBuffer();
+  const file = new File([arrayBuffer], 'audio.ogg', { type: 'audio/ogg; codecs=opus' });
+
+  const result = await groq.audio.transcriptions.create({
+    file,
+    model: 'whisper-large-v3-turbo',
+    language: 'pt',
+  });
+
+  return result.text;
+}
+
 export { MENU_ITEMS };
