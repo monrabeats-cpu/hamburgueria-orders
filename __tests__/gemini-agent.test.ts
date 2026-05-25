@@ -91,4 +91,11 @@ describe('cleanContent', () => {
     expect(result).toContain('Antes');
     expect(result).toContain('Depois');
   });
+
+  it('returns empty string when content is entirely a tool-call artifact', () => {
+    // When the LLM puts the tool call in content instead of tool_calls field,
+    // cleanContent strips everything — caller must apply fallback
+    const onlyArtifact = '<function=criar_pedido>{"items":[],"total":0,"delivery_type":"entrega"}</function>';
+    expect(cleanContent(onlyArtifact)).toBe('');
+  });
 });

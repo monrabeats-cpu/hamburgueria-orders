@@ -146,7 +146,20 @@ export async function callGroqAgent(
     };
   }
 
-  return { text: cleanContent(message.content ?? 'Desculpe, não entendi. Pode repetir?'), orderData: null };
+  const rawContent = message.content ?? '';
+  const cleaned = cleanContent(rawContent);
+
+  if (!cleaned) {
+    // LLM returned empty or only tool-call artifacts in content field — log for diagnosis
+    console.warn(JSON.stringify({
+      event: 'groq_empty_content',
+      finish_reason: choice.finish_reason,
+      had_tool_calls: false,
+      raw_length: rawContent.length,
+    }));
+  }
+
+  return { text: cleaned || 'Desculpe, não entendi. Pode repetir?', orderData: null };
 }
 
 export { MENU_ITEMS };
