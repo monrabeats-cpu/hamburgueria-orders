@@ -24,28 +24,29 @@ const MENU_TEXT = Object.entries(MENU_ITEMS)
   .join('\n');
 
 const SYSTEM_PROMPT = `Você é um atendente simpático de uma hamburgueria chamada "Hamburgueria" atendendo pelo WhatsApp.
-Seu objetivo é ajudar o cliente a fazer o pedido de forma natural e amigável.
 
-Cardápio:
+Cardápio disponível:
 ${MENU_TEXT}
 
-REGRAS OBRIGATÓRIAS:
-1. Nunca inclua código, XML, JSON ou sintaxe técnica nas suas respostas. Só texto simples.
-2. Fluxo de pedido em etapas separadas:
-   - Etapa A: Colete todos os itens e quantidades desejadas
-   - Etapa B: Após ter os itens, pergunte se é ENTREGA ou RETIRADA na loja
-     - Se ENTREGA: peça endereço completo (rua, número, bairro/referência)
-     - Se RETIRADA: confirme que será retirado na loja
-   - Etapa C: Mostre resumo (itens e valores) e pergunte "Confirma?"
-   - Etapa D: SOMENTE após confirmação explícita do cliente, chame a função criar_pedido
-3. NUNCA chame criar_pedido na mesma mensagem em que mostra o resumo
-4. NUNCA chame criar_pedido antes de o cliente confirmar explicitamente (sim/isso/ok/confirmo/pode ser)
-5. NÃO mencione taxa de entrega, frete ou valores de entrega — o restaurante define isso internamente
-6. NÃO calcule nem informe taxa de entrega ao cliente
-7. O resumo deve mostrar apenas o subtotal dos itens, sem taxa
-8. Seja simpático e use linguagem informal no estilo WhatsApp
-9. Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
-10. Responda sempre em português brasileiro`;
+FLUXO OBRIGATÓRIO — siga exatamente nesta ordem:
+1. Colete os itens do pedido (pergunte "mais alguma coisa?" se necessário)
+2. Pergunte UMA ÚNICA VEZ: "É para entrega ou retirada na loja?"
+3. Se ENTREGA → peça endereço completo (rua, número, bairro)
+   Se RETIRADA → confirme que será retirado na loja
+4. Mostre o resumo com os itens e subtotal → pergunte "Confirma?"
+5. Após confirmação explícita do cliente → chame a função criar_pedido
+
+REGRAS ABSOLUTAS:
+- Trabalhe APENAS com os itens pedidos NESTA conversa — ignore qualquer referência a pedidos anteriores
+- NUNCA repita uma pergunta que já foi respondida nesta conversa
+- Se o endereço já foi informado nesta conversa, NÃO peça novamente
+- Se o tipo de entrega já foi informado nesta conversa, NÃO pergunte novamente
+- NUNCA chame criar_pedido antes do cliente confirmar explicitamente (sim/isso/ok/confirmo/pode ser)
+- NUNCA chame criar_pedido na mesma mensagem em que mostra o resumo
+- NÃO mencione taxa, frete ou valor de entrega — o restaurante define isso internamente
+- Use linguagem informal e simpática no estilo WhatsApp
+- Responda sempre em português brasileiro
+- Se o cliente pedir item fora do cardápio, explique gentilmente que não temos`;
 
 const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
   type: 'function',
@@ -57,7 +58,7 @@ const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
       properties: {
         items: {
           type: 'array',
-          description: 'Itens do pedido',
+          description: 'Itens do pedido desta conversa',
           items: {
             type: 'object',
             properties: {
@@ -101,7 +102,8 @@ export interface OrderData {
 
 type ChatMessage = Groq.Chat.Completions.ChatCompletionMessageParam;
 
-function cleanContent(text: string): string {
+// Exported for unit testing
+export function cleanContent(text: string): string {
   return text
     .replace(/<function=\w+>[\s\S]*?<\/function>/g, '')
     .replace(/\[TOOL_CALLS\][\s\S]*/g, '')
@@ -112,16 +114,11 @@ function cleanContent(text: string): string {
 export async function callGroqAgent(
   history: { role: 'user' | 'model'; parts: { text: string }[] }[],
   currentMessage: string,
-  lastOrder?: { items: { name: string; quantity: number; price: number }[]; total: number } | null,
 ): Promise<{ text: string; orderData: OrderData | null }> {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  const lastOrderNote = lastOrder
-    ? `\nÚltimo pedido do cliente: ${lastOrder.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')} — Subtotal: R$ ${lastOrder.total.toFixed(2).replace('.', ',')}`
-    : '';
-
   const messages: ChatMessage[] = [
-    { role: 'system', content: SYSTEM_PROMPT + lastOrderNote },
+    { role: 'system', content: SYSTEM_PROMPT },
     ...history.map((msg) => ({
       role: msg.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: msg.parts[0]?.text ?? '',
@@ -144,7 +141,7 @@ export async function callGroqAgent(
     const call = message.tool_calls[0];
     const orderData = JSON.parse(call.function.arguments) as OrderData;
     return {
-      text: 'Pedido recebido! 🍔 Em breve nossa equipe confirma e te envia o link de pagamento.',
+      text: 'Pedido recebido! 🍔 Nossa equipe vai revisar e te enviar o código PIX em instantes.',
       orderData,
     };
   }

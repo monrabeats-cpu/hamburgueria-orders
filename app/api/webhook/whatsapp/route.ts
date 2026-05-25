@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Check if client already has an active order today
   const { data: activeOrder } = await supabase
     .from('orders')
     .select('id, status')
@@ -49,35 +50,23 @@ export async function POST(request: NextRequest) {
   if (activeOrder) {
     replyBody = getActiveOrderReply(activeOrder.status as OrderStatus);
   } else {
-    const { data: lastOrder } = await supabase
-      .from('orders')
-      .select('created_at, items, total')
-      .eq('whatsapp_number', from)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const sessionStart = lastOrder ? new Date(lastOrder.created_at) : today;
-
+    // Load only today's messages — prevents old conversations from polluting context
+    // and causing the LLM to reference items from previous sessions
     const { data: previousMessages } = await supabase
       .from('messages')
       .select('direction, content')
       .eq('whatsapp_number', from)
-      .gt('created_at', sessionStart.toISOString())
+      .gte('created_at', today.toISOString())
       .order('created_at', { ascending: true })
       .limit(20);
 
-    const history = (previousMessages ?? []).map((msg) => ({
+    const history = (previousMessages ?? []).map((msg: { direction: string; content: string }) => ({
       role: (msg.direction === 'inbound' ? 'user' : 'model') as 'user' | 'model',
       parts: [{ text: msg.content }],
     }));
 
-    const lastOrderContext = lastOrder
-      ? { items: lastOrder.items as { name: string; quantity: number; price: number }[], total: lastOrder.total as number }
-      : null;
-
     try {
-      const { text, orderData } = await callGroqAgent(history, messageBody, lastOrderContext);
+      const { text, orderData } = await callGroqAgent(history, messageBody);
       replyBody = text;
 
       if (orderData) {
@@ -94,9 +83,10 @@ export async function POST(request: NextRequest) {
 
           targetOrderId = result.orderId;
 
-          const deliveryLine = orderData.delivery_type === 'retirada'
-            ? '📦 Retirada na loja'
-            : `🛵 Entrega — ${orderData.address ?? 'endereço confirmado'}`;
+          const deliveryLine =
+            orderData.delivery_type === 'retirada'
+              ? '📦 Retirada na loja'
+              : `🛵 Entrega — ${orderData.address ?? 'endereço confirmado'}`;
 
           replyBody = [
             `🍔 *Pedido recebido!*`,
@@ -119,22 +109,32 @@ export async function POST(request: NextRequest) {
   }
 
   // Log inbound message (non-blocking — never crash the webhook on DB errors)
-  supabase.from('messages').insert({
-    order_id: targetOrderId,
-    whatsapp_number: from,
-    direction: 'inbound',
-    content: messageBody,
-  }).then(({ error }) => { if (error) console.error('Message log failed (inbound):', error); });
+  supabase
+    .from('messages')
+    .insert({
+      order_id: targetOrderId,
+      whatsapp_number: from,
+      direction: 'inbound',
+      content: messageBody,
+    })
+    .then(({ error }: { error: unknown }) => {
+      if (error) console.error('Message log failed (inbound):', error);
+    });
 
   const twimlResponse = new twilio.twiml.MessagingResponse();
 
   if (replyBody) {
-    supabase.from('messages').insert({
-      order_id: targetOrderId,
-      whatsapp_number: from,
-      direction: 'outbound',
-      content: replyBody,
-    }).then(({ error }) => { if (error) console.error('Message log failed (outbound):', error); });
+    supabase
+      .from('messages')
+      .insert({
+        order_id: targetOrderId,
+        whatsapp_number: from,
+        direction: 'outbound',
+        content: replyBody,
+      })
+      .then(({ error }: { error: unknown }) => {
+        if (error) console.error('Message log failed (outbound):', error);
+      });
 
     twimlResponse.message(replyBody);
   }
