@@ -8,6 +8,7 @@ const VALID_STATUSES = new Set<string>([
   ...STATUS_FLOW,
   'cancelled',
   'aguardando_pagamento',
+  'revisao',
   'expirado',
   'confirmed',
   'ready',

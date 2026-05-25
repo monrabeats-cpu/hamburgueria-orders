@@ -10,6 +10,8 @@ export const STATUS_NOTIFICATION: Partial<Record<OrderStatus, string>> = {
 };
 
 export const STATUS_ACTIVE_REPLY: Partial<Record<OrderStatus, string>> = {
+  revisao:
+    'Seu pedido está em revisão! Em breve você receberá o código PIX para pagamento. ⏳',
   aguardando_pagamento:
     'Seu pedido está aguardando o pagamento PIX! Verifique o código que enviamos e efetue o pagamento. ⏰',
   pago: 'Pagamento confirmado! Seu pedido já está na fila de preparo. 🍔',

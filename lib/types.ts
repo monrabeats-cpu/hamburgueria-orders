@@ -1,4 +1,5 @@
 export type OrderStatus =
+  | 'revisao'
   | 'aguardando_pagamento'
   | 'pago'
   | 'received'
@@ -25,6 +26,8 @@ export interface Order {
   status: OrderStatus;
   notes: string | null;
   address: string | null;
+  delivery_fee?: number | null;
+  delivery_type?: 'entrega' | 'retirada' | null;
   pix_transaction_id?: string | null;
   pix_qrcode?: string | null;
   pix_copia_cola?: string | null;
@@ -33,9 +36,10 @@ export interface Order {
   updated_at: string;
 }
 
-// Kitchen Kanban flow: Recebido → Pago → Preparando → Em Entrega → Entregue
+// Full operational flow: Revisão → Aguardando PIX → Pago → Preparando → Em Entrega → Entregue
 export const STATUS_FLOW: OrderStatus[] = [
-  'received',
+  'revisao',
+  'aguardando_pagamento',
   'pago',
   'preparing',
   'out_for_delivery',
@@ -43,6 +47,7 @@ export const STATUS_FLOW: OrderStatus[] = [
 ];
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
+  revisao: 'Em Revisão',
   aguardando_pagamento: 'Aguardando PIX',
   pago: 'Pago',
   received: 'Recebido',
@@ -56,6 +61,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 
 export const STATUS_COLORS: Record<OrderStatus, string> = {
+  revisao: 'bg-purple-100 text-purple-800',
   aguardando_pagamento: 'bg-yellow-100 text-yellow-800',
   pago: 'bg-emerald-100 text-emerald-800',
   received: 'bg-blue-100 text-blue-800',

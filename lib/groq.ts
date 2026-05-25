@@ -31,14 +31,21 @@ ${MENU_TEXT}
 
 REGRAS OBRIGATÓRIAS:
 1. Nunca inclua código, XML, JSON ou sintaxe técnica nas suas respostas. Só texto simples.
-2. Fluxo de pedido tem DUAS etapas separadas:
-   - Etapa A: Quando souber todos os itens, mostre o resumo com valores e pergunte "Confirma?"
-   - Etapa B: SOMENTE quando o cliente responder confirmando (sim/isso/ok/confirmo/pode ser), aí chame a função criar_pedido
+2. Fluxo de pedido em etapas separadas:
+   - Etapa A: Colete todos os itens e quantidades desejadas
+   - Etapa B: Após ter os itens, pergunte se é ENTREGA ou RETIRADA na loja
+     - Se ENTREGA: peça endereço completo (rua, número, bairro/referência)
+     - Se RETIRADA: confirme que será retirado na loja
+   - Etapa C: Mostre resumo (itens e valores) e pergunte "Confirma?"
+   - Etapa D: SOMENTE após confirmação explícita do cliente, chame a função criar_pedido
 3. NUNCA chame criar_pedido na mesma mensagem em que mostra o resumo
-4. NUNCA chame criar_pedido antes de o cliente confirmar
-5. Seja simpático e use linguagem informal no estilo WhatsApp
-6. Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
-7. Responda sempre em português brasileiro`;
+4. NUNCA chame criar_pedido antes de o cliente confirmar explicitamente (sim/isso/ok/confirmo/pode ser)
+5. NÃO mencione taxa de entrega, frete ou valores de entrega — o restaurante define isso internamente
+6. NÃO calcule nem informe taxa de entrega ao cliente
+7. O resumo deve mostrar apenas o subtotal dos itens, sem taxa
+8. Seja simpático e use linguagem informal no estilo WhatsApp
+9. Se o cliente pedir algo fora do cardápio, explique gentilmente que não temos
+10. Responda sempre em português brasileiro`;
 
 const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
   type: 'function',
@@ -61,11 +68,25 @@ const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
             required: ['name', 'quantity', 'price'],
           },
         },
-        total: { type: 'number', description: 'Valor total do pedido' },
-        address: { type: 'string', description: 'Endereço de entrega, se informado' },
-        notes: { type: 'string', description: 'Observações como sem cebola, etc' },
+        total: {
+          type: 'number',
+          description: 'Subtotal dos itens (SEM taxa de entrega)',
+        },
+        delivery_type: {
+          type: 'string',
+          enum: ['entrega', 'retirada'],
+          description: 'Entrega no endereço ou retirada na loja',
+        },
+        address: {
+          type: 'string',
+          description: 'Endereço completo de entrega (obrigatório se delivery_type = entrega)',
+        },
+        notes: {
+          type: 'string',
+          description: 'Observações como sem cebola, ponto da carne, etc',
+        },
       },
-      required: ['items', 'total'],
+      required: ['items', 'total', 'delivery_type'],
     },
   },
 };
@@ -73,6 +94,7 @@ const criarPedidoTool: Groq.Chat.Completions.ChatCompletionTool = {
 export interface OrderData {
   items: { name: string; quantity: number; price: number }[];
   total: number;
+  delivery_type: 'entrega' | 'retirada';
   address?: string;
   notes?: string;
 }
@@ -95,7 +117,7 @@ export async function callGroqAgent(
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
   const lastOrderNote = lastOrder
-    ? `\nÚltimo pedido do cliente: ${lastOrder.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')} — Total: R$ ${lastOrder.total.toFixed(2).replace('.', ',')}`
+    ? `\nÚltimo pedido do cliente: ${lastOrder.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')} — Subtotal: R$ ${lastOrder.total.toFixed(2).replace('.', ',')}`
     : '';
 
   const messages: ChatMessage[] = [
@@ -122,7 +144,7 @@ export async function callGroqAgent(
     const call = message.tool_calls[0];
     const orderData = JSON.parse(call.function.arguments) as OrderData;
     return {
-      text: 'Pedido confirmado! Em breve entraremos em contato. 🍔',
+      text: 'Pedido recebido! 🍔 Em breve nossa equipe confirma e te envia o link de pagamento.',
       orderData,
     };
   }

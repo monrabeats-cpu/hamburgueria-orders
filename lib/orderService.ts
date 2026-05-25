@@ -2,6 +2,60 @@ import { createServiceClient } from './supabase/server';
 import { createPixPayment, PixPaymentResult } from './paymentService';
 import { OrderItem } from './types';
 
+// ─── Review-first order (IA creates this; dashboard adds fee + PIX) ───────────
+
+export interface CreateReviewOrderParams {
+  whatsappNumber: string;
+  customerName: string | null;
+  items: OrderItem[];
+  total: number;
+  deliveryType?: 'entrega' | 'retirada' | null;
+  address?: string | null;
+  notes?: string | null;
+}
+
+export interface CreateReviewOrderResult {
+  orderId: string;
+}
+
+export async function createReviewOrder(
+  params: CreateReviewOrderParams,
+): Promise<CreateReviewOrderResult> {
+  const supabase = createServiceClient();
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .insert({
+      whatsapp_number: params.whatsappNumber,
+      customer_name: params.customerName,
+      items: params.items,
+      total: params.total,
+      status: 'revisao',
+      address: params.address ?? null,
+      notes: params.notes ?? null,
+      delivery_type: params.deliveryType ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (error || !order) {
+    throw new Error(`Failed to create review order: ${error?.message}`);
+  }
+
+  console.log(
+    JSON.stringify({
+      event: 'review_order_created',
+      orderId: order.id,
+      whatsapp: params.whatsappNumber,
+      deliveryType: params.deliveryType,
+    }),
+  );
+
+  return { orderId: order.id };
+}
+
+// ─── Legacy: direct PIX creation (still used by /api/criar-pagamento) ─────────
+
 export interface CreateOrderWithPixParams {
   whatsappNumber: string;
   customerName: string | null;

@@ -9,10 +9,12 @@ interface OrderBoardProps {
   initialOrders: Order[];
 }
 
+// All active columns (everything except delivered — terminal state)
 const BOARD_STATUSES = STATUS_FLOW.filter((s) => s !== 'delivered') as OrderStatus[];
 
 const COLUMN_ACCENT: Record<string, string> = {
-  received: 'border-t-blue-400',
+  revisao: 'border-t-purple-400',
+  aguardando_pagamento: 'border-t-yellow-400',
   pago: 'border-t-emerald-400',
   preparing: 'border-t-amber-400',
   out_for_delivery: 'border-t-orange-400',
@@ -30,7 +32,7 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
     const { data } = await supabase
       .from('orders')
       .select('*')
-      .not('status', 'in', '("delivered","cancelled","aguardando_pagamento","expirado")')
+      .not('status', 'in', '("delivered","cancelled","expirado")')
       .gte('created_at', today.toISOString())
       .order('created_at', { ascending: false });
     if (data) setOrders(data as Order[]);
@@ -50,6 +52,12 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
   const updateLocal = useCallback((id: string, status: OrderStatus) => {
     setOrders((prev) =>
       prev.map((o) => (o.id === id ? { ...o, status, updated_at: new Date().toISOString() } : o)),
+    );
+  }, []);
+
+  const updateOrderFields = useCallback((id: string, updates: Partial<Order>) => {
+    setOrders((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, ...updates, updated_at: new Date().toISOString() } : o)),
     );
   }, []);
 
@@ -126,7 +134,7 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
         {BOARD_STATUSES.map((status) => {
           const col = byStatus(status);
           return (
@@ -143,7 +151,12 @@ export default function OrderBoard({ initialOrders }: OrderBoardProps) {
 
               <div className="space-y-3 min-h-[60px]">
                 {col.map((order) => (
-                  <OrderCard key={order.id} order={order} onStatusChange={updateLocal} />
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    onStatusChange={updateLocal}
+                    onOrderUpdate={updateOrderFields}
+                  />
                 ))}
                 {col.length === 0 && (
                   <p className="text-center text-slate-400 text-xs py-8">Nenhum pedido</p>
